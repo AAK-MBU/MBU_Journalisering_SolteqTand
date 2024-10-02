@@ -25,3 +25,7 @@ QUEUE_NAME = None
 MAX_TASK_COUNT = 100
 
 # ----------------------
+
+# Solteq Tand
+APP_PATH = "C:\\Program Files (x86)\\TM Care\\TM Tand\\TMTand.exe"
+PATH_TO_FILE = "C:\\tmp\\Fritvalg"
