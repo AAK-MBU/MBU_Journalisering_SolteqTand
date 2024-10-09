@@ -1,7 +1,7 @@
 """This module contains the main process of the robot."""
 from OpenOrchestrator.orchestrator_connection.connection import OrchestratorConnection
 from mbu_dev_shared_components.utils.db_stored_procedure_executor import execute_stored_procedure
-from mbu_dev_shared_components.solteqtand.app_handler import PatientOpenError
+from mbu_dev_shared_components.solteqtand.app_handler import ManualProcessingRequiredError
 from robot_framework.sub_processes import helper_functions as hf
 
 
@@ -13,48 +13,62 @@ def process(orchestrator_connection: OrchestratorConnection) -> None:
 
     solteq_tand_creds = hf.get_credential(orchestrator_connection, "solteq_tand_svcrpambu001")
     os2forms_api_key = hf.get_credential(orchestrator_connection, "os2_api")
+
     conn_db_rpa = hf.get_constant(orchestrator_connection, "DbConnectionString")
     conn_db_solteq_tand = hf.get_constant(orchestrator_connection, "solteq_tand_db_connstr")
 
     webform_id = oc_arg_json.get("webformId")
-    hub_table_name = oc_arg_json.get("tableName")
-    case_metadata, forms = hf.get_case_metadata_and_forms(conn_db_rpa, webform_id, hub_table_name)
+
+    case_metadata = hf.get_journalize_metadata(conn_db_rpa, webform_id)
+
+    forms = hf.get_forms(conn_db_rpa, case_metadata.get('tableName', None))
+
     stored_procedure = case_metadata.get('hubUpdateProcessStatus', None)
 
-    app_obj = hf.initalize_solteq_tand(solteq_tand_creds)
+    if forms:
+        app_obj = hf.initalize_solteq_tand(solteq_tand_creds)
 
-    for form in forms:
-        try:
-            form_ssn = form.get('cpr')
-            if form_ssn is None or form_ssn == "":
-                orchestrator_connection.log_error("No SSN found!.")
-                raise PatientOpenError
+        for form in forms:
+            try:
+                if form.get('cpr_barn') is not None:
+                    form_ssn = form.get('cpr_barn')
+                else:
+                    form_ssn = form.get('cpr_voksen')
 
-            hf.handle_form(app_obj, form, case_metadata, os2forms_api_key, conn_db_rpa, conn_db_solteq_tand, solteq_tand_creds, form_ssn)
+                if form_ssn is None or form_ssn == "":
+                    orchestrator_connection.log_error("No SSN found!.")
+                    raise ManualProcessingRequiredError
 
-        except PatientOpenError:
-            orchestrator_connection.log_error("Error occurred: Patient could not be opened. There is no patient with the provided CPR number.")
-            update_hub_status(
-                connection_string=conn_db_rpa,
-                status="Manuel",
-                hub_table_name=hub_table_name,
-                stored_procedure=stored_procedure,
-                uuid=form.get('uuid')
-            )
+                form_ssn_not_in_list = form.get('mit_barn_kommer_ikke_frem_i_listen')
+                if form_ssn_not_in_list == '1':
+                    orchestrator_connection.log_error("SSN not in list is marked.")
+                    raise ManualProcessingRequiredError
 
-        except Exception:
-            orchestrator_connection.log_error("Error occurred.")
-            update_hub_status(
-                connection_string=conn_db_rpa,
-                status="Failed",
-                hub_table_name=hub_table_name,
-                stored_procedure=stored_procedure,
-                uuid=form.get('uuid')
-            )
-            raise
+                hf.handle_form(app_obj, form, case_metadata, os2forms_api_key, conn_db_rpa, conn_db_solteq_tand, solteq_tand_creds, form_ssn)
 
-        finally:
-            app_obj.close_solteq_tand()
+            except ManualProcessingRequiredError:
+                orchestrator_connection.log_error("Manual processing is needed. The form is added to a manuel list.")
+                update_hub_status(
+                    connection_string=conn_db_rpa,
+                    status="Manuel",
+                    hub_table_name=case_metadata.get('tableName', None),
+                    stored_procedure=stored_procedure,
+                    uuid=form.get('uuid')
+                )
+
+            except Exception:
+                orchestrator_connection.log_error("Error occurred.")
+                update_hub_status(
+                    connection_string=conn_db_rpa,
+                    status="Failed",
+                    hub_table_name=case_metadata.get('tableName', None),
+                    stored_procedure=stored_procedure,
+                    uuid=form.get('uuid')
+                )
+                raise
+
+            finally:
+                app_obj.close_solteq_tand()
 
 
 def update_hub_status(connection_string, status, uuid, hub_table_name, stored_procedure):
@@ -65,8 +79,3 @@ def update_hub_status(connection_string, status, uuid, hub_table_name, stored_pr
         "TableName": ("str", f'{hub_table_name}')
     }
     execute_stored_procedure(connection_string=connection_string, stored_procedure=stored_procedure, params=status_params)
-
-
-if __name__ == "__main__":
-    oc = OrchestratorConnection.create_connection_from_args()
-    process(oc)
