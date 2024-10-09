@@ -132,8 +132,8 @@ def _ensure_file_exists(file_path):
     """
     if not os.path.exists(file_path):
         raise OSError('File does not exists')
-    else:
-        print(f'File "{file_path}" exists.')
+
+    print(f'File "{file_path}" exists.')
 
 
 def _ensure_folder_exists(full_path):
