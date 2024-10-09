@@ -1,22 +1,33 @@
-"""MISSING"""
+"""
+This module provides a set of helper functions and classes for interacting with a SQL database, processing forms,
+handling files, and integrating with the Solteq Tand application. It includes functionality to retrieve form data,
+metadata, manage files, and execute application-specific processes such as uploading receipts, creating journal notes,
+and handling patient records.
+"""
 import os
 import json
 import pyodbc
-import time
 from mbu_dev_shared_components.os2forms.documents import download_file_bytes
-from mbu_dev_shared_components.solteqtand.app_handler import SolteqTandApp, PatientOpenError
+from mbu_dev_shared_components.solteqtand.app_handler import SolteqTandApp, ManualProcessingRequiredError
 from mbu_dev_shared_components.solteqtand.db_handler import SolteqTandDatabase
 from mbu_dev_shared_components.utils.db_stored_procedure_executor import execute_stored_procedure
-
 from robot_framework import config
 
 
-class ManualProcessingRequiredError(Exception):
-    """Class to handle errors that needs to be handled manually."""
+def get_forms(connection_string, table_name):
+    """Fetches the next available form from a specified table in the SQL database.
 
+    Args:
+        connection_string (str): The connection string to the database.
+        table_name (str): The name of the table from which to fetch form data.
 
-def get_next_form(connection_string, table_name):
-    """Get form data from Hub in SQL database."""
+    Returns:
+        list[dict]: A list of dictionaries where each dictionary contains data related to a form.
+
+    Raises:
+        pyodbc.Error: If an error occurs while accessing the database.
+        Exception: For any other unexpected errors.
+    """
     try:
         conn = pyodbc.connect(connection_string)
         cursor = conn.cursor()
@@ -24,13 +35,14 @@ def get_next_form(connection_string, table_name):
         cursor.execute(
             f"""
             SELECT  uuid,
-                    JSON_VALUE(data, '$.data.cpr_nummer_barn') as cpr,
+                    JSON_VALUE(data, '$.data.cpr_nummer_barn') as cpr_barn,
+                    JSON_VALUE(data, '$.data.cpr_nummer') as cpr_voksen,
                     JSON_VALUE(data, '$.data.jeg_giver_tilladelse_til_at_tandplejen_aarhus_maa_sende_journal_') as samtykke_til_journaloverdragelse,
                     JSON_VALUE(data, '$.data.adresse') as klinik_adresse,
                     JSON_VALUE(data, '$.data.tandklinik') as klinik_navn,
                     JSON_VALUE(data, '$.data.attachments.kvittering_valg_af_privat_tandklinik_som_leverandoer_af_det_komm.url') as url
             FROM    [RPA].[rpa].{table_name}
-            WHERE   uuid = '1A76EB35-B824-40AF-B0FA-59F76D8CCBF6'
+            WHERE   process_status IS NULL
             """
         )
         rows = cursor.fetchall()
@@ -50,7 +62,19 @@ def get_next_form(connection_string, table_name):
 
 
 def fetch_case_metadata(connection_string, os2formwebform_id):
-    """Retrieve metadata for a specific os2formWebformId."""
+    """Retrieve metadata for a specific os2formWebformId from the SQL database.
+
+    Args:
+        connection_string (str): The connection string to the database.
+        os2formwebform_id (str): The ID of the form for which metadata is being fetched.
+
+    Returns:
+        dict: A dictionary containing the case metadata.
+
+    Raises:
+        pyodbc.Error: If an error occurs while accessing the database.
+        Exception: For any other unexpected errors.
+    """
     try:
         with pyodbc.connect(connection_string) as conn:
             cursor = conn.cursor()
@@ -98,15 +122,29 @@ def fetch_case_metadata(connection_string, os2formwebform_id):
 
 
 def _ensure_file_exists(file_path):
-    """Checks if the file exists. If not, creates an empty file."""
+    """Checks if the specified file exists.
+
+    Args:
+        file_path (str): The full path of the file to check.
+
+    Raises:
+        OSError: If the file does not exist.
+    """
     if not os.path.exists(file_path):
         raise OSError('File does not exists')
-    else:
-        print(f'File "{file_path}" already exists.')
+
+    print(f'File "{file_path}" exists.')
 
 
 def _ensure_folder_exists(full_path):
-    """Checks if folder exists. If not, creates the folder."""
+    """Ensures that the folder for the given path exists. Creates the folder if it doesn't exist.
+
+    Args:
+        full_path (str): The full path where the folder should be created.
+
+    Raises:
+        OSError: If there is an error creating the folder.
+    """
     folder_path = os.path.dirname(full_path)
 
     if not os.path.exists(folder_path):
@@ -121,7 +159,14 @@ def _ensure_folder_exists(full_path):
 
 
 def _delete_file(full_path: str):
-    """Deletes the given file."""
+    """Deletes the specified file if it exists.
+
+    Args:
+        full_path (str): The full path of the file to be deleted.
+
+    Raises:
+        OSError: If an error occurs while trying to delete the file.
+    """
     if os.path.isfile(full_path):
         try:
             os.remove(full_path)
@@ -134,7 +179,17 @@ def _delete_file(full_path: str):
 
 
 def download_receipt(url: str, api_key: str, full_path: str):
-    """Downloads the receipt for the given form"""
+    """Downloads the receipt from the given URL and saves it to the specified path.
+
+    Args:
+        url (str): The URL from which to download the receipt.
+        api_key (str): The API key for authentication to access the URL.
+        full_path (str): The full path where the receipt should be saved.
+
+    Raises:
+        OSError: If there is an error related to the file system.
+        Exception: For any other unexpected errors during the download process.
+    """
     try:
         _ensure_folder_exists(full_path)
         _delete_file(full_path)
@@ -142,6 +197,7 @@ def download_receipt(url: str, api_key: str, full_path: str):
         with open(full_path, 'wb') as file:
             file.write(file_bytes)
         print(f"File created: {full_path}")
+        _ensure_file_exists(full_path)
     except OSError as e:
         print(f"File system error when attempting to download the receipt. {e}")
         raise
@@ -151,45 +207,97 @@ def download_receipt(url: str, api_key: str, full_path: str):
 
 
 def get_credential(orchestrator_connection, credential_name):
-    """Helper function to fetch credentials and handle potential errors."""
+    """Fetches credentials from the orchestrator.
+
+    Args:
+        orchestrator_connection: The connection to the orchestrator.
+        credential_name (str): The name of the credential to retrieve.
+
+    Returns:
+        The credential value.
+
+    Raises:
+        RuntimeError: If there is an error fetching the credential.
+    """
     try:
         return orchestrator_connection.get_credential(credential_name)
     except RuntimeError as e:
-        print("Error fetching credential %s: %s", credential_name, e)
+        print("Error fetching credential: ", credential_name, e)
         raise
 
 
 def get_constant(orchestrator_connection, constant_name):
-    """Helper function to fetch constants and handle potential errors."""
+    """Fetches a constant from the orchestrator.
+
+    Args:
+        orchestrator_connection: The connection to the orchestrator.
+        constant_name (str): The name of the constant to retrieve.
+
+    Returns:
+        The constant value.
+
+    Raises:
+        RuntimeError: If there is an error fetching the constant.
+    """
     try:
         return orchestrator_connection.get_constant(constant_name).value
     except RuntimeError as e:
-        print("Error fetching constant %s: %s", constant_name, e)
+        print("Error fetching constant: ", constant_name, e)
         raise
 
 
 def process_orchestration_arguments(orchestrator_connection):
-    """Helper function to process orchestration arguments."""
+    """Processes the orchestration arguments by parsing them from JSON.
+
+    Args:
+        orchestrator_connection: The connection to the orchestrator.
+
+    Returns:
+        dict: The parsed arguments as a dictionary.
+
+    Raises:
+        RuntimeError: If there is an error parsing the arguments.
+    """
     try:
         return json.loads(orchestrator_connection.process_arguments)
     except RuntimeError as e:
-        print("Error parsing process arguments: %s", e)
+        print("Error parsing process arguments: ", e)
         raise
 
 
-def get_case_metadata_and_forms(conn_db_rpa, webform_id, hub_table_name):
-    """Helper function to fetch case metadata and forms."""
+def get_journalize_metadata(conn_db_rpa, webform_id):
+    """Fetches metadata for a given webform ID.
+
+    Args:
+        conn_db_rpa (str): The database connection string for RPA.
+        webform_id (str): The ID of the webform.
+
+    Returns:
+        dict: A dictionary containing metadata.
+
+    Raises:
+        RuntimeError: If an error occurs while fetching metadata.
+    """
     try:
         case_metadata = fetch_case_metadata(connection_string=conn_db_rpa, os2formwebform_id=webform_id)
-        forms = get_next_form(connection_string=conn_db_rpa, table_name=hub_table_name)
-        return case_metadata, forms
+        return case_metadata
     except RuntimeError as e:
-        print("Error fetching case metadata or forms: %s", e)
+        print("Error fetching metadata: ", e)
         raise
 
 
 def _get_note_message(form_consent, case_metadata, clinic_name, clinic_address):
-    """Creates the journal note message based on consent status."""
+    """Generates a journal note message based on the consent status of the form.
+
+    Args:
+        form_consent (str): The consent status from the form (1 for consent, 0 for no consent).
+        case_metadata (dict): The case metadata including templates for the note message.
+        clinic_name (str): The name of the clinic.
+        clinic_address (str): The address of the clinic.
+
+    Returns:
+        str: The formatted journal note message.
+    """
     if form_consent == "1":
         note_template = case_metadata.get('caseData', {}).get('note', [{}])[0].get('noteMessageConsent', '')
     else:
@@ -199,7 +307,14 @@ def _get_note_message(form_consent, case_metadata, clinic_name, clinic_address):
 
 
 def initalize_solteq_tand(solteq_tand_creds):
-    """MISSING"""
+    """Initializes the Solteq Tand application and logs in using the provided credentials.
+
+    Args:
+        solteq_tand_creds: Credentials object with username and password for the Solteq Tand app.
+
+    Returns:
+        SolteqTandApp: The initialized Solteq Tand application object.
+    """
     app_obj = SolteqTandApp(
         app_path=config.APP_PATH,
         username=solteq_tand_creds.username,
@@ -211,23 +326,35 @@ def initalize_solteq_tand(solteq_tand_creds):
     return app_obj
 
 
-def handle_form(app_obj, form, case_metadata, os2forms_api_key, conn_db_rpa, conn_db_solteq_tand, solteq_tand_creds, ssn):
-    """Handles the processing of an individual form."""
+def handle_form(app_obj, form, case_metadata, os2forms_api_key, conn_db_rpa, conn_db_solteq_tand, ssn):
+    """Handles the processing of an individual form by interacting with Solteq Tand and updating the database.
+
+    Args:
+        app_obj (SolteqTandApp): The initialized Solteq Tand application object.
+        form (dict): The form data to be processed.
+        case_metadata (dict): The case metadata related to the form.
+        os2forms_api_key (str): The API key for OS2Forms.
+        conn_db_rpa (str): The database connection string for RPA.
+        conn_db_solteq_tand (str): The database connection string for Solteq Tand.
+        ssn (str): The social security number for the patient.
+
+    Raises:
+        ManualProcessingRequiredError: If further manual processing is needed.
+        Exception: If any unexpected error occurs during the form handling process.
+    """
     form_ssn = ssn
     full_path = os.path.join(config.PATH_TO_FILE, case_metadata.get('documentData', {}).get('fileName', None))
 
     try:
         app_obj.open_patient(ssn=form_ssn)
 
-    except PatientOpenError as e:
+    except ManualProcessingRequiredError as e:
         print(f"Exception caught: {e}")
         raise
 
     try:
         receipt_url = form.get('url')
-        # download_receipt(url=receipt_url, api_key=os2forms_api_key.password, full_path=full_path)
-
-        _ensure_file_exists(full_path)
+        download_receipt(url=receipt_url, api_key=os2forms_api_key.password, full_path=full_path)
 
         app_obj.create_document(
             document_full_path=full_path,
@@ -247,16 +374,17 @@ def handle_form(app_obj, form, case_metadata, os2forms_api_key, conn_db_rpa, con
             patient_clinic=primary_dental_clinic_name
         )
 
-        forn_clinic_name = form.get('klinik_navn')
-        forn_clinic_address = form.get('klinik_adresse')
-        form_consent = form.get('samtykke_til_journaloverdragelse')
+        forn_clinic_name = form.get('klinik_navn') if form.get('klinik_navn') is not None else "[Ingen]"
+        forn_clinic_address = form.get('klinik_adresse') if form.get('klinik_adresse') is not None else "[Ingen]"
+        form_consent = form.get('samtykke_til_journaloverdragelse') if form.get('samtykke_til_journaloverdragelse') is not None else None
+
         note_message = _get_note_message(form_consent, case_metadata, forn_clinic_name, forn_clinic_address)
 
         app_obj.create_journal_note(note_message=note_message, checkmark_in_complete=True)
 
         table_name = case_metadata.get('tableName', None)
         stored_procedure = case_metadata.get('hubUpdateProcessStatus', None)
-        uuid = form.get('uuid')
+        uuid = form.get('uuid', None)
         status_params = {
             "Status": ("str", "Successful"),
             "uuid": ("str", f'{uuid}'),
@@ -266,7 +394,7 @@ def handle_form(app_obj, form, case_metadata, os2forms_api_key, conn_db_rpa, con
 
         app_obj.close_patient_window()
 
-    except (RuntimeError, OSError) as e:
+    except (Exception, RuntimeError, OSError) as e:
         print(f"Exception caught: {e}")
         raise e
 
