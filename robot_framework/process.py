@@ -44,7 +44,7 @@ def process(orchestrator_connection: OrchestratorConnection) -> None:
                     orchestrator_connection.log_error("SSN not in list is marked.")
                     raise ManualProcessingRequiredError
 
-                hf.handle_form(app_obj, form, case_metadata, os2forms_api_key, conn_db_rpa, conn_db_solteq_tand, solteq_tand_creds, form_ssn)
+                hf.handle_form(app_obj, form, case_metadata, os2forms_api_key, conn_db_rpa, conn_db_solteq_tand, form_ssn)
 
             except ManualProcessingRequiredError:
                 orchestrator_connection.log_error("Manual processing is needed. The form is added to a manuel list.")

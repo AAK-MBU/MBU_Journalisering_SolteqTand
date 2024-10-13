@@ -39,7 +39,7 @@ def get_forms(connection_string, table_name):
                     JSON_VALUE(data, '$.data.cpr_nummer') as cpr_voksen,
                     JSON_VALUE(data, '$.data.jeg_giver_tilladelse_til_at_tandplejen_aarhus_maa_sende_journal_') as samtykke_til_journaloverdragelse,
                     JSON_VALUE(data, '$.data.adresse') as klinik_adresse,
-                    JSON_VALUE(data, '$.data.tandklinik') as klinik_navn,
+                    JSON_VALUE(data, '$.data.tandlaege') as klinik_navn,
                     JSON_VALUE(data, '$.data.attachments.kvittering_valg_af_privat_tandklinik_som_leverandoer_af_det_komm.url') as url
             FROM    [RPA].[rpa].{table_name}
             WHERE   process_status IS NULL
