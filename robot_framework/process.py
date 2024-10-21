@@ -72,7 +72,7 @@ def process(orchestrator_connection: OrchestratorConnection) -> None:
 
 
 def update_hub_status(connection_string, status, uuid, hub_table_name, stored_procedure):
-    """MISSING"""
+    """Updates hub status."""
     status_params = {
         "Status": ("str", f"{status}"),
         "uuid": ("str", f'{uuid}'),
