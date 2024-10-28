@@ -65,10 +65,10 @@ def process(orchestrator_connection: OrchestratorConnection) -> None:
                     stored_procedure=stored_procedure,
                     uuid=form.get('uuid')
                 )
+                app_obj.close_solteq_tand()
                 raise
 
-            finally:
-                app_obj.close_solteq_tand()
+        app_obj.close_solteq_tand()
 
 
 def update_hub_status(connection_string, status, uuid, hub_table_name, stored_procedure):
