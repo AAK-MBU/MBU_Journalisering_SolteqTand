@@ -27,15 +27,17 @@ def close_all(orchestrator_connection: OrchestratorConnection) -> None:
 def kill_all(orchestrator_connection: OrchestratorConnection) -> None:
     """Forcefully close all applications used by the robot."""
     orchestrator_connection.log_trace("Killing all applications.")
-    kill_process_by_name("TMTand.exe")
+    kill_process_by_name(orchestrator_connection, process_name="TMTand.exe")
 
 
-def kill_process_by_name(process_name):
+def kill_process_by_name(orchestrator_connection: OrchestratorConnection, process_name: str):
     """Kills all processes with the specified name."""
+    orchestrator_connection.log_trace(f"Searching for process: {process_name}.")
     for proc in psutil.process_iter(['pid', 'name']):
         if proc.info['name'] == process_name:
+            orchestrator_connection.log_trace(f"Killing {proc.info['name']}.")
             proc.kill()
-            print(f"Killed process {proc.info['name']} with PID {proc.info['pid']}")
+            orchestrator_connection.log_trace(f"Killed process {proc.info['name']} with PID {proc.info['pid']}")
 
 
 def open_all(orchestrator_connection: OrchestratorConnection) -> None:
