@@ -17,7 +17,9 @@ classifiers = [
 ]
 dependencies = [
     "OpenOrchestrator == 1.*",
-    "Pillow == 10.*",
+    "Pillow == 11.1.0",
+    "mbu-dev-shared-components >= 0.0.58",
+    "psutil",
 ]
 
 [project.optional-dependencies]

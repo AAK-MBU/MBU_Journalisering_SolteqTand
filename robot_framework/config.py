@@ -7,7 +7,7 @@ MAX_RETRY_COUNT = 3
 FAIL_ROBOT_ON_TOO_MANY_ERRORS = True
 
 # Error screenshot config
-SMTP_SERVER = "smtp.adm.aarhuskommune.dk"
+SMTP_SERVER = "smtp.aarhuskommune.local"
 SMTP_PORT = 25
 SCREENSHOT_SENDER = "robot@friend.dk"
 
@@ -25,3 +25,7 @@ QUEUE_NAME = None
 MAX_TASK_COUNT = 100
 
 # ----------------------
+
+# Solteq Tand
+APP_PATH = "C:\\Program Files (x86)\\TM Care\\TM Tand\\TMTand.exe"
+PATH_TO_FILE = "C:\\tmp\\Fritvalg"
