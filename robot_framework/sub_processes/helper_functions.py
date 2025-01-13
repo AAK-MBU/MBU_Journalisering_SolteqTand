@@ -4,6 +4,7 @@ handling files, and integrating with the Solteq Tand application. It includes fu
 metadata, manage files, and execute application-specific processes such as uploading receipts, creating journal notes,
 and handling patient records ect.
 """
+import time
 import os
 import json
 import pyodbc
@@ -35,12 +36,15 @@ def get_forms(connection_string, form_type):
         cursor.execute(
             """
             SELECT  form_id,
-                    JSON_VALUE(form_data, '$.data.cpr_nummer_barn') as cpr_barn,
-                    JSON_VALUE(form_data, '$.data.cpr_nummer') as cpr_voksen,
-                    JSON_VALUE(form_data, '$.data.jeg_giver_tilladelse_til_at_tandplejen_aarhus_maa_sende_journal_') as samtykke_til_journaloverdragelse,
-                    JSON_VALUE(form_data, '$.data.adresse') as klinik_adresse,
-                    JSON_VALUE(form_data, '$.data.tandlaege') as klinik_navn,
-                    JSON_VALUE(form_data, '$.data.attachments.kvittering_valg_af_privat_tandklinik_som_leverandoer_af_det_komm.url') as url
+                    JSON_VALUE(form_data, '$.data.cpr_nummer_barn') AS cpr_barn,
+                    JSON_VALUE(form_data, '$.data.cpr_nummer') AS cpr_voksen,
+                    JSON_VALUE(form_data, '$.data.jeg_giver_tilladelse_til_at_tandplejen_aarhus_maa_sende_journal_') AS samtykke_til_journaloverdragelse,
+                    JSON_VALUE(form_data, '$.data.adresse') AS klinik_adresse,
+                    JSON_VALUE(form_data, '$.data.tandlaege') AS klinik_navn,
+					(
+                        SELECT TOP 1 JSON_VALUE(a.value, '$.url') 
+						FROM OPENJSON(JSON_QUERY(form_data, '$.data.attachments')) a
+					) AS url
             FROM    [RPA].[journalizing].[view_Journalizing]
             WHERE   status IS NULL
                     AND form_type = ?
@@ -312,6 +316,7 @@ def initalize_solteq_tand(solteq_tand_creds):
         password=solteq_tand_creds.password,
     )
     app_obj.start_application()
+    time.sleep(2)
     app_obj.login()
 
     return app_obj
