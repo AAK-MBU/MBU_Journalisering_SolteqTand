@@ -38,13 +38,13 @@ def get_forms(connection_string, form_type):
             SELECT  form_id,
                     JSON_VALUE(form_data, '$.data.cpr_nummer_barn') AS cpr_barn,
                     JSON_VALUE(form_data, '$.data.cpr_nummer') AS cpr_voksen,
-                    JSON_VALUE(form_data, '$.data.jeg_giver_tilladelse_til_at_tandplejen_aarhus_maa_sende_journal_') AS samtykke_til_journaloverdragelse,
                     JSON_VALUE(form_data, '$.data.adresse') AS klinik_adresse,
                     JSON_VALUE(form_data, '$.data.tandlaege') AS klinik_navn,
-					(
-                        SELECT TOP 1 JSON_VALUE(a.value, '$.url') 
-						FROM OPENJSON(JSON_QUERY(form_data, '$.data.attachments')) a
-					) AS url
+                    (
+                        SELECT TOP 1 JSON_VALUE(a.value, '$.url')
+                        FROM OPENJSON(JSON_QUERY(form_data, '$.data.attachments')) a
+                    ) AS url,
+                    form_data
             FROM    [RPA].[journalizing].[view_Journalizing]
             WHERE   status IS NULL
                     AND form_type = ?
@@ -281,24 +281,86 @@ def get_journalize_metadata(conn_db_rpa, webform_id):
         raise
 
 
-def _get_note_message(form_consent, case_metadata, clinic_name, clinic_address):
-    """Generates a journal note message based on the consent status of the form.
+def get_journal_note_data(form, case_metadata, consent_field):
+    """
+    Retrieves the appropriate journal note based on the consent_field value.
+
+    :param form: Dictionary containing form data.
+    :param case_metadata: Dictionary containing case metadata.
+    :param consent_field: The key for the consent field to check.
+    :return: A tuple containing the message and close_note values.
+    """
+    try:
+        consent_field_value = None
+        message = None
+        close_note = None
+
+        if consent_field:
+            consent_field_value = get_node_value(form.get('form_data', {}), consent_field)
+
+        if consent_field_value is None or consent_field_value == "1":
+            message = case_metadata.get('caseData', {}).get('note', {}).get('noteMessage', {}).get('message', None)
+            close_note = case_metadata.get('caseData', {}).get('note', {}).get('noteMessage', {}).get('closeNote', None)
+        elif consent_field_value != "1":
+            message = case_metadata.get('caseData', {}).get('note', {}).get('noteMessageNoConsent', {}).get('message', None)
+            close_note = case_metadata.get('caseData', {}).get('note', {}).get('noteMessageNoConsent', {}).get('closeNote', None)
+
+        return message, close_note
+
+    except (Exception, RuntimeError) as e:
+        print(f"Exception caught: {e}")
+        raise e
+
+
+def _clean_note_message(text, substrings):
+    """
+    Removes specified substrings from the input text.
 
     Args:
-        form_consent (str): The consent status from the form (1 for consent, 0 for no consent).
-        case_metadata (dict): The case metadata including templates for the note message.
-        clinic_name (str): The name of the clinic.
-        clinic_address (str): The address of the clinic.
+        text (str): The original string to be cleaned.
+        substrings (list): A list of substrings to remove from the text.
 
     Returns:
-        str: The formatted journal note message.
+        str: The cleaned string with specified substrings removed.
     """
-    if form_consent == "1":
-        note_template = case_metadata.get('caseData', {}).get('note', [{}])[0].get('noteMessageConsent', '')
-    else:
-        note_template = case_metadata.get('caseData', {}).get('note', [{}])[0].get('noteMessageNoConsent', '')
+    for substring in substrings:
+        text = text.replace(substring, "")
+    return text
 
-    return note_template.replace('[tandlæge]', clinic_name).replace('[Adresse]', clinic_address)
+
+def get_node_value(json_string, node_name):
+    """
+    Searches for a specific node in a JSON string and returns its value if it exists.
+
+    :param json_string: The JSON string to search within.
+    :param node_name: The name of the node to find.
+    :return: The value of the node if it exists, or None if it doesn't.
+    """
+    try:
+        # Parse the JSON string into a Python dictionary
+        data = json.loads(json_string)
+
+        # Recursively search for the node
+        def search_node(data, target):
+            if isinstance(data, dict):
+                for key, value in data.items():
+                    if key == target:
+                        return value
+                    result = search_node(value, target)
+                    if result is not None:
+                        return result
+            elif isinstance(data, list):
+                for item in data:
+                    result = search_node(item, target)
+                    if result is not None:
+                        return result
+            return None
+
+        # Call the recursive function
+        return search_node(data, node_name)
+    except json.JSONDecodeError as e:
+        print("Invalid JSON:", e)
+        return None
 
 
 def initalize_solteq_tand(solteq_tand_creds):
@@ -346,9 +408,10 @@ def handle_form(app_obj, form, case_metadata, os2forms_api_key, conn_db_rpa, con
         raise
 
     try:
-        document_type = case_metadata.get('documentData', {}).get('documentType', None)
-        filename = case_metadata.get('documentData', {}).get('fileName', None)
         form_id = form.get('form_id', None)
+        document_type = case_metadata.get('documentData', {}).get('documentType', None)
+
+        filename = case_metadata.get('documentData', {}).get('fileName', None)
         full_path = os.path.join(config.PATH_TO_FILE, filename)
 
         receipt_url = form.get('url')
@@ -359,6 +422,7 @@ def handle_form(app_obj, form, case_metadata, os2forms_api_key, conn_db_rpa, con
             ssn=ssn
         )
 
+        # Check if document exists, if not then create the document in the file cabinet.
         document_exists = db_obj.check_if_document_exists(filename=filename, documenttype=document_type)
         if not document_exists:
             app_obj.create_document(
@@ -366,45 +430,55 @@ def handle_form(app_obj, form, case_metadata, os2forms_api_key, conn_db_rpa, con
                 document_type=document_type,
                 document_description=form_id
             )
+            sql_data_params = {
+                "StepName": ("str", "Document"),
+                "JsonFragment": ("str", json.dumps({"DocumentCreated": True})),
+                "form_id": ("str", form_id)
+            }
+            execute_stored_procedure(connection_string=conn_db_rpa, stored_procedure=case_metadata.get('spUpdateResponseData', None), params=sql_data_params)
 
+        # Check if event exists, if not then create the event.
         primary_dental_clinic = db_obj.get_primary_dental_clinic()
         primary_dental_clinic_name = primary_dental_clinic.get('data', {}).get('preferredDentalClinicName')
 
-        event_exists = db_obj.check_if_event_exists(event_message=case_metadata.get('caseData', {}).get('event', {}).get('eventMessage', None), event_name=primary_dental_clinic_name)
+        event_message = case_metadata.get('caseData', {}).get('event', {}).get('message', None)
+        is_archived = case_metadata.get('caseData', {}).get('event', {}).get('isArchived', None)
+
+        event_exists = db_obj.check_if_event_exists(event_message=event_message, event_name=primary_dental_clinic_name, is_archived=is_archived)
         if not event_exists:
             app_obj.create_event(
-                event_message=case_metadata.get('caseData', {}).get('event', {}).get('eventMessage', None),
+                event_message=event_message,
                 patient_clinic=primary_dental_clinic_name
             )
+            sql_data_params = {
+                "StepName": ("str", "Event"),
+                "JsonFragment": ("str", json.dumps({"EventCreated": True})),
+                "form_id": ("str", form_id)
+            }
+            execute_stored_procedure(connection_string=conn_db_rpa, stored_procedure=case_metadata.get('spUpdateResponseData', None), params=sql_data_params)
 
-        forn_clinic_name = form.get('klinik_navn') if form.get('klinik_navn') is not None else "[Ingen]"
-        forn_clinic_address = form.get('klinik_adresse') if form.get('klinik_adresse') is not None else "[Ingen]"
-        form_consent = form.get('samtykke_til_journaloverdragelse') if form.get('samtykke_til_journaloverdragelse') is not None else None
+        # Check if journal note exists, if not then create the note.
+        clinic_name = form.get('klinik_navn') if form.get('klinik_navn') is not None else "[Ingen]"
+        clinic_address = form.get('klinik_adresse') if form.get('klinik_adresse') is not None else "[Ingen]"
 
-        note_message = _get_note_message(form_consent, case_metadata, forn_clinic_name, forn_clinic_address)
+        consent_field = case_metadata.get('caseData', {}).get('note', {}).get('consentField', None)
+        note_message, close_note = get_journal_note_data(form, case_metadata, consent_field)
 
-        def _clean_note_message(text, substrings):
-            """
-            Removes specified substrings from the input text.
-
-            Args:
-                text (str): The original string to be cleaned.
-                substrings (list): A list of substrings to remove from the text.
-
-            Returns:
-                str: The cleaned string with specified substrings removed.
-            """
-            for substring in substrings:
-                text = text.replace(substring, "")
-            return text
-
+        message_modified = note_message.replace('[tandlæge]', clinic_name).replace('[Adresse]', clinic_address)
         substrings_to_remove = ["Administrativt notat ", "'"]
-        cleaned_note_message = _clean_note_message(note_message, substrings_to_remove)
+        cleaned_note_message = _clean_note_message(message_modified, substrings_to_remove)
 
         journal_note_exists = db_obj.get_journal_notes(note_message=cleaned_note_message)
         if not journal_note_exists:
-            app_obj.create_journal_note(note_message=note_message, checkmark_in_complete=True)
+            app_obj.create_journal_note(note_message=message_modified, checkmark_in_complete=close_note)
+            sql_data_params = {
+                "StepName": ("str", "JournalNote"),
+                "JsonFragment": ("str", json.dumps({"JournalNoteCreated": True})),
+                "form_id": ("str", form_id)
+            }
+            execute_stored_procedure(connection_string=conn_db_rpa, stored_procedure=case_metadata.get('spUpdateResponseData', None), params=sql_data_params)
 
+        # Update form status in the database.
         stored_procedure = case_metadata.get('spUpdateProcessStatus', None)
         form_id = form.get('form_id', None)
         status_params = {
