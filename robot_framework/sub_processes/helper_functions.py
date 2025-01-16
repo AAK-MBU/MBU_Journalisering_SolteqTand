@@ -423,7 +423,7 @@ def handle_form(app_obj, form, case_metadata, os2forms_api_key, conn_db_rpa, con
         )
 
         # Check if document exists, if not then create the document in the file cabinet.
-        document_exists = db_obj.check_if_document_exists(filename=filename, documenttype=document_type)
+        document_exists = db_obj.check_if_document_exists(filename=filename, documenttype=document_type, form_id=form_id)
         if not document_exists:
             app_obj.create_document(
                 document_full_path=full_path,
