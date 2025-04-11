@@ -46,7 +46,7 @@ def get_forms(connection_string, form_type):
                     ) AS url,
                     form_data
             FROM    [RPA].[journalizing].[view_Journalizing]
-            WHERE   status IS NULL
+            WHERE   status = 'New'
                     AND form_type = ?
             """,
             (form_type,)
