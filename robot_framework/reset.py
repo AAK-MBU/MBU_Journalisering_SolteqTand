@@ -1,6 +1,8 @@
 """This module handles resetting the state of the computer so the robot can work with a clean slate."""
 
 import psutil
+import os
+from psutil import AccessDenied, NoSuchProcess, ZombieProcess
 
 from OpenOrchestrator.orchestrator_connection.connection import OrchestratorConnection
 
@@ -27,7 +29,7 @@ def close_all(orchestrator_connection: OrchestratorConnection) -> None:
 def kill_all(orchestrator_connection: OrchestratorConnection) -> None:
     """Forcefully close all applications used by the robot."""
     orchestrator_connection.log_trace("Killing all applications.")
-    kill_process_by_name(orchestrator_connection, process_name="TMTand.exe")
+    kill_process_by_name(orchestrator_connection, application_name="TMTand.exe")
 
 
 # def kill_process_by_name(orchestrator_connection: OrchestratorConnection, process_name: str):
@@ -45,9 +47,7 @@ def kill_process_by_name(orchestrator_connection: OrchestratorConnection, applic
     orchestrator_connection.log_trace(f"Killing {application_name} processes.")
 
     procs = []
-    for proc in psutil.process_iter(
-        attrs=["pid", "name", "exe", "cmdline"], ad_value=None
-    ):
+    for proc in psutil.process_iter(attrs=["pid", "name", "exe", "cmdline"], ad_value=None):
         try:
             name = (proc.info.get("name") or "").lower()
             exe_base = os.path.basename(proc.info.get("exe") or "").lower()
@@ -55,7 +55,6 @@ def kill_process_by_name(orchestrator_connection: OrchestratorConnection, applic
                 procs.append(proc)
         except (NoSuchProcess, ZombieProcess):
             continue
-        # pylint: disable-next = broad-exception-caught
         except Exception as e:
             orchestrator_connection.log_trace(
                 f"While enumerating {application_name}, skipping PID {getattr(proc, 'pid', '?')}: {e}"
