@@ -1,6 +1,7 @@
 """This module handles resetting the state of the computer so the robot can work with a clean slate."""
 
 import psutil
+from psutil import AccessDenied, NoSuchProcess, ZombieProcess
 
 from OpenOrchestrator.orchestrator_connection.connection import OrchestratorConnection
 
