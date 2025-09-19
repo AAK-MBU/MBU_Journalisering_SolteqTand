@@ -1,12 +1,14 @@
 """This module handles resetting the state of the computer so the robot can work with a clean slate."""
 
-import psutil
+import os
 
+import psutil
 from OpenOrchestrator.orchestrator_connection.connection import OrchestratorConnection
+from psutil import AccessDenied, NoSuchProcess, ZombieProcess
 
 
 def reset(orchestrator_connection: OrchestratorConnection) -> None:
-    """Clean up, close/kill all programs and start them again. """
+    """Clean up, close/kill all programs and start them again."""
     orchestrator_connection.log_trace("Resetting.")
     clean_up(orchestrator_connection)
     close_all(orchestrator_connection)
@@ -27,7 +29,7 @@ def close_all(orchestrator_connection: OrchestratorConnection) -> None:
 def kill_all(orchestrator_connection: OrchestratorConnection) -> None:
     """Forcefully close all applications used by the robot."""
     orchestrator_connection.log_trace("Killing all applications.")
-    kill_process_by_name(orchestrator_connection, process_name="TMTand.exe")
+    kill_process_by_name(orchestrator_connection, application_name="TMTand.exe")
 
 
 # def kill_process_by_name(orchestrator_connection: OrchestratorConnection, process_name: str):
@@ -39,7 +41,10 @@ def kill_all(orchestrator_connection: OrchestratorConnection) -> None:
 #             proc.kill()
 #             orchestrator_connection.log_trace(f"Killed process {proc.info['name']} with PID {proc.info['pid']}")
 
-def kill_process_by_name(orchestrator_connection: OrchestratorConnection, application_name: str):
+
+def kill_process_by_name(
+    orchestrator_connection: OrchestratorConnection, application_name: str
+):
     """Kills all processes with the specified name."""
     target = application_name.lower()
     orchestrator_connection.log_trace(f"Killing {application_name} processes.")
