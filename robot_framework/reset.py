@@ -60,7 +60,6 @@ def kill_process_by_name(
                 procs.append(proc)
         except (NoSuchProcess, ZombieProcess):
             continue
-        # pylint: disable-next = broad-exception-caught
         except Exception as e:
             orchestrator_connection.log_trace(
                 f"While enumerating {application_name}, skipping PID {getattr(proc, 'pid', '?')}: {e}"
