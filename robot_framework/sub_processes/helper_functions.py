@@ -299,126 +299,57 @@ def get_journalize_metadata(conn_db_rpa, webform_id):
         raise
 
 
-# def get_journal_note_data(form, case_metadata, consent_field):
-#     """
-#     Retrieves the appropriate journal note based on the consent_field value.
-
-#     :param form: Dictionary containing form data.
-#     :param case_metadata: Dictionary containing case metadata.
-#     :param consent_field: The key for the consent field to check.
-#     :return: A tuple containing the message and close_note values.
-#     """
-#     try:
-#         consent_field_value = None
-#         message = None
-#         close_note = None
-
-#         if consent_field:
-#             consent_field_value = get_node_value(
-#                 form.get("form_data", {}), consent_field
-#             )
-
-#         if consent_field_value is None or consent_field_value == "1":
-#             message = (
-#                 case_metadata.get("caseData", {})
-#                 .get("note", {})
-#                 .get("noteMessage", {})
-#                 .get("message", None)
-#             )
-#             close_note = (
-#                 case_metadata.get("caseData", {})
-#                 .get("note", {})
-#                 .get("noteMessage", {})
-#                 .get("closeNote", None)
-#             )
-#         elif consent_field_value != "1":
-#             message = (
-#                 case_metadata.get("caseData", {})
-#                 .get("note", {})
-#                 .get("noteMessageNoConsent", {})
-#                 .get("message", None)
-#             )
-#             close_note = (
-#                 case_metadata.get("caseData", {})
-#                 .get("note", {})
-#                 .get("noteMessageNoConsent", {})
-#                 .get("closeNote", None)
-#             )
-
-#         return message, close_note
-
-#     except (Exception, RuntimeError) as e:
-#         print(f"Exception caught: {e}")
-#         raise e
-
-
-def get_journal_note_data(form, case_metadata):
+def get_journal_note_data(form, case_metadata, consent_field):
     """
-    Determines which note message to create based on the consent fields.
-    Supports both Structure A (multiple consent fields + optional subnotes)
-    and Structure B (single consentField + yes/no note).
+    Retrieves the appropriate journal note based on the consent_field value.
 
-    Returns:
-        message (str)
-        close_note (bool)
-        sub_note (str or None)
+    :param form: Dictionary containing form data.
+    :param case_metadata: Dictionary containing case metadata.
+    :param consent_field: The key for the consent field to check.
+    :return: A tuple containing the message and close_note values.
     """
+    try:
+        consent_field_value = None
+        message = None
+        close_note = None
 
-    note = case_metadata.get("caseData", {}).get("note", {})
-    use_sub = note.get("useSubNotes", False)
+        if consent_field:
+            consent_field_value = get_node_value(
+                form.get("form_data", {}), consent_field
+            )
 
-    # ------------------------------------------------------------
-    # STRUCTURE B (NO subnotes, single consentField)
-    # ------------------------------------------------------------
-    if "consentField" in note:
-        field_name = note["consentField"]
-        form_value = form.get(field_name)
+        if consent_field_value is None or consent_field_value == "1":
+            message = (
+                case_metadata.get("caseData", {})
+                .get("note", {})
+                .get("noteMessage", {})
+                .get("message", None)
+            )
+            close_note = (
+                case_metadata.get("caseData", {})
+                .get("note", {})
+                .get("noteMessage", {})
+                .get("closeNote", None)
+            )
+        elif consent_field_value != "1":
+            message = (
+                case_metadata.get("caseData", {})
+                .get("note", {})
+                .get("noteMessageNoConsent", {})
+                .get("message", None)
+            )
+            close_note = (
+                case_metadata.get("caseData", {})
+                .get("note", {})
+                .get("noteMessageNoConsent", {})
+                .get("closeNote", None)
+            )
 
-        if form_value == "Ja":
-            block = note.get("noteMessage", {})
-        else:
-            block = note.get("noteMessageNoConsent", {})
+        return message, close_note
 
-        return block.get("message"), block.get("closeNote"), None
-
-    # ------------------------------------------------------------
-    # STRUCTURE A (multiple consent fields, may include subnotes)
-    # ------------------------------------------------------------
-    consent_map = {
-        "consentFieldAll": "noteMessageConsentAll",
-        "consentFieldGeneral": "noteMessageConsentGeneral",
-        "consentFieldTreatment": "noteMessageConsentTreatment",
-    }
-
-    base_message = note.get("noteMessage", {}).get("message", "")
-    base_close = note.get("noteMessage", {}).get("closeNote", True)
-
-    for consent_field, message_key in consent_map.items():
-        if consent_field not in note:
-            continue
-
-        form_field_name = note[consent_field]
-        form_value = form.get(form_field_name)
-
-        if form_value == "Ja":
-            block = note.get(message_key, {})
-
-            final_message = base_message + "\n" + block.get("message", "")
-
-            sub_note = None
-            if "subNote" in block:
-                sub_note = block["subNote"]["message"]
-                if use_sub:
-                    final_message += "\n" + sub_note
-
-            close_note = block.get("closeNote", base_close)
-
-            return final_message, close_note, sub_note
-
-    # ------------------------------------------------------------
-    # FALLBACK → return base note with no subnote
-    # ------------------------------------------------------------
-    return base_message, base_close, None
+    except (Exception, RuntimeError) as e:
+        print(f"Exception caught: {e}")
+        raise e
 
 
 def _clean_note_message(text, substrings):
@@ -494,7 +425,7 @@ def initalize_solteq_tand(solteq_tand_creds):
 
 
 def handle_form(
-    app_obj: SolteqTandApp,
+    app_obj,
     form,
     case_metadata,
     os2forms_api_key,
@@ -604,11 +535,11 @@ def handle_form(
             else "[Ingen]"
         )
 
-        # consent_field = (
-        #     case_metadata.get("caseData", {}).get("note", {}).get("consentField", None)
-        # )
-        note_message, close_note, subnote_message = get_journal_note_data(
-            form, case_metadata
+        consent_field = (
+            case_metadata.get("caseData", {}).get("note", {}).get("consentField", None)
+        )
+        note_message, close_note = get_journal_note_data(
+            form, case_metadata, consent_field
         )
 
         message_modified = note_message.replace("[tandlæge]", clinic_name).replace(
@@ -619,7 +550,6 @@ def handle_form(
             message_modified, substrings_to_remove
         )
 
-        # Check if journal note exists, if not then create the note.
         journal_note_exists = db_obj.get_journal_notes(
             note_message=cleaned_note_message
         )
@@ -637,28 +567,6 @@ def handle_form(
                 stored_procedure=case_metadata.get("spUpdateResponseData", None),
                 params=sql_data_params,
             )
-
-        # Check if journal sub note exists, if not then create the sub note.
-        if subnote_message:
-            cleaned_subnote = _clean_note_message(subnote_message, substrings_to_remove)
-            journal_sub_note_exists = db_obj.get_journal_notes(
-                note_message=cleaned_subnote
-            )
-            if not journal_sub_note_exists:
-                app_obj.create_journal_sub_note(note_message=subnote_message)
-                sql_data_params = {
-                    "StepName": ("str", "JournalSubNote"),
-                    "JsonFragment": (
-                        "str",
-                        json.dumps({"JournalSubNoteCreated": True}),
-                    ),
-                    "form_id": ("str", form_id),
-                }
-                execute_stored_procedure(
-                    connection_string=conn_db_rpa,
-                    stored_procedure=case_metadata.get("spUpdateResponseData", None),
-                    params=sql_data_params,
-                )
 
         # Update form status in the database.
         stored_procedure = case_metadata.get("spUpdateProcessStatus", None)
