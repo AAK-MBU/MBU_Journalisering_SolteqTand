@@ -7,11 +7,8 @@ import sys
 
 from OpenOrchestrator.orchestrator_connection.connection import OrchestratorConnection
 
-from robot_framework import initialize
-from robot_framework import reset
+from robot_framework import config, initialize, process, reset
 from robot_framework.exceptions import BusinessError, handle_error, log_exception
-from robot_framework import process
-from robot_framework import config
 
 
 def main():
@@ -38,7 +35,9 @@ def main():
         # pylint: disable-next = broad-exception-caught
         except Exception as error:
             error_count += 1
-            handle_error(f"Process Error #{error_count}", error, None, orchestrator_connection)
+            handle_error(
+                f"Process Error #{error_count}", error, None, orchestrator_connection
+            )
 
     reset.clean_up(orchestrator_connection)
     reset.close_all(orchestrator_connection)
